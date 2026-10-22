@@ -14,8 +14,12 @@ export class AMAudioEngine {
   private skywaveLfoGain: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
 
-  // Static generator nodes
-  private noiseNode: AudioBufferSourceNode | null = null;
+  // Dedicated White-Noise & Atmospheric Static generator nodes
+  private whiteNoiseNode: AudioBufferSourceNode | null = null;
+  private crackleNoiseNode: AudioBufferSourceNode | null = null;
+  private whiteNoiseGain: GainNode | null = null;
+  private crackleNoiseGain: GainNode | null = null;
+  private staticFilter: BiquadFilterNode | null = null;
   private isStaticRunning = false;
   private isConnectedToWebAudio = false;
 
@@ -119,15 +123,38 @@ export class AMAudioEngine {
   private startNoiseSynthesizer() {
     if (!this.audioCtx || this.isStaticRunning) return;
 
-    // Generate 5 seconds of medium wave atmospheric pink & bandpass noise buffer
-    const bufferSize = this.audioCtx.sampleRate * 5;
-    const noiseBuffer = this.audioCtx.createBuffer(1, bufferSize, this.audioCtx.sampleRate);
-    const output = noiseBuffer.getChannelData(0);
+    const sampleRate = this.audioCtx.sampleRate;
+    const duration = 5; // 5-second seamless loop buffer
+    const bufferSize = sampleRate * duration;
 
+    // 1. Pure Gaussian White-Noise Generator (Johnson-Nyquist RF thermal noise)
+    const whiteBuffer = this.audioCtx.createBuffer(1, bufferSize, sampleRate);
+    const whiteData = whiteBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i += 2) {
+      // Box-Muller transform for true Gaussian white noise
+      const u1 = Math.max(1e-6, Math.random());
+      const u2 = Math.random();
+      const radius = Math.sqrt(-2.0 * Math.log(u1));
+      const theta = 2.0 * Math.PI * u2;
+      whiteData[i] = radius * Math.cos(theta) * 0.12;
+      if (i + 1 < bufferSize) {
+        whiteData[i + 1] = radius * Math.sin(theta) * 0.12;
+      }
+    }
+
+    this.whiteNoiseNode = this.audioCtx.createBufferSource();
+    this.whiteNoiseNode.buffer = whiteBuffer;
+    this.whiteNoiseNode.loop = true;
+
+    this.whiteNoiseGain = this.audioCtx.createGain();
+    this.whiteNoiseGain.gain.setValueAtTime(0.65, this.audioCtx.currentTime);
+
+    // 2. Medium-Wave Atmospheric Crackle / Spherics (Lightning & Ionospheric discharge)
+    const crackleBuffer = this.audioCtx.createBuffer(1, bufferSize, sampleRate);
+    const crackleData = crackleBuffer.getChannelData(0);
     let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
     for (let i = 0; i < bufferSize; i++) {
       const white = Math.random() * 2 - 1;
-      // Pink noise filter algorithm
       b0 = 0.99886 * b0 + white * 0.0555179;
       b1 = 0.99332 * b1 + white * 0.0750759;
       b2 = 0.96900 * b2 + white * 0.1538520;
@@ -137,33 +164,43 @@ export class AMAudioEngine {
       let pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
       b6 = white * 0.115926;
 
-      // Occasional faint atmospheric crackle / static discharge
-      if (Math.random() < 0.0008) {
-        pink += (Math.random() * 2 - 1) * 3.5;
+      // Occasional faint atmospheric crackle bursts
+      if (Math.random() < 0.0007) {
+        pink += (Math.random() * 2 - 1) * 3.4;
       }
-      output[i] = pink * 0.08;
+      crackleData[i] = pink * 0.065;
     }
 
-    this.noiseNode = this.audioCtx.createBufferSource();
-    this.noiseNode.buffer = noiseBuffer;
-    this.noiseNode.loop = true;
+    this.crackleNoiseNode = this.audioCtx.createBufferSource();
+    this.crackleNoiseNode.buffer = crackleBuffer;
+    this.crackleNoiseNode.loop = true;
 
-    // Filter noise to AM broadcast spectrum (300Hz - 3800Hz)
-    const noiseFilter = this.audioCtx.createBiquadFilter();
-    noiseFilter.type = 'bandpass';
-    noiseFilter.frequency.setValueAtTime(1400, this.audioCtx.currentTime);
-    noiseFilter.Q.setValueAtTime(0.8, this.audioCtx.currentTime);
+    this.crackleNoiseGain = this.audioCtx.createGain();
+    this.crackleNoiseGain.gain.setValueAtTime(0.35, this.audioCtx.currentTime);
 
-    this.noiseNode.connect(noiseFilter);
+    // 3. Medium-Wave IF Bandpass Filter (Simulates 455 kHz receiver IF bandpass)
+    this.staticFilter = this.audioCtx.createBiquadFilter();
+    this.staticFilter.type = 'bandpass';
+    this.staticFilter.frequency.setValueAtTime(1600, this.audioCtx.currentTime);
+    this.staticFilter.Q.setValueAtTime(0.85, this.audioCtx.currentTime);
+
+    // Connect noise sources to filter and staticGain
+    this.whiteNoiseNode.connect(this.whiteNoiseGain);
+    this.whiteNoiseGain.connect(this.staticFilter);
+
+    this.crackleNoiseNode.connect(this.crackleNoiseGain);
+    this.crackleNoiseGain.connect(this.staticFilter);
+
     if (this.staticGain) {
-      noiseFilter.connect(this.staticGain);
+      this.staticFilter.connect(this.staticGain);
     }
 
     try {
-      this.noiseNode.start();
+      this.whiteNoiseNode.start();
+      this.crackleNoiseNode.start();
       this.isStaticRunning = true;
     } catch {
-      // Ignored
+      // Ignored if audio context is restarting
     }
   }
 
@@ -173,6 +210,9 @@ export class AMAudioEngine {
   }
 
   public async setFrequency(freq: number) {
+    if (this.audioCtx && this.audioCtx.state === 'suspended') {
+      this.audioCtx.resume().catch(() => {});
+    }
     this.currentFrequency = Math.max(530, Math.min(1710, Math.round(freq)));
     this.evaluateSignal();
   }
@@ -368,12 +408,26 @@ export class AMAudioEngine {
       }
     }
 
-    // Static volume: inversely proportional to station lock
-    const staticBase = this.settings.staticVolume;
-    const currentStaticGain = Math.max(0.04 * staticBase, (1 - strength * 0.95) * staticBase);
+    // Dynamic White-Noise scaling based on S-meter strength and carrier proximity:
+    // When tuning between stations (absOffset > 10 kHz, strength ≈ 0, S1):
+    // -> Receiver AGC opens wide, producing the authentic full-spectrum white-noise rush.
+    // As carrier strength rises (S3 -> S5 -> S7 -> S9):
+    // -> AGC progressively and non-linearly suppresses the white-noise floor.
+    // At S9+20dB / S9+30dB (strength >= 0.8):
+    // -> White noise drops to a clean imperceptible floor (< 1%), letting broadcast stream shine.
+    const noiseScale = Math.max(0.005, Math.pow(1 - strength, 1.75));
+    const dynamicStaticGain = noiseScale * this.settings.staticVolume;
 
     if (this.staticGain && ctx) {
-      this.staticGain.gain.setTargetAtTime(currentStaticGain, now, 0.05);
+      this.staticGain.gain.setTargetAtTime(dynamicStaticGain, now, 0.035);
+    }
+
+    // Dynamic IF noise filter bandwidth:
+    // Open-band static has crisp high-frequency hiss (~3200 Hz cutoff);
+    // as carrier locks, residual noise bandwidth softens to 1600 Hz.
+    if (this.staticFilter && ctx) {
+      const dynamicBandwidth = 1600 + (1 - strength) * 1600;
+      this.staticFilter.frequency.setTargetAtTime(dynamicBandwidth, now, 0.04);
     }
 
     // Heterodyne whine:
@@ -383,7 +437,7 @@ export class AMAudioEngine {
         // Frequency of whistle: offset * 110 Hz (e.g. 3 kHz offset = 330 Hz whine)
         const whistleFreq = Math.max(80, Math.min(2200, absOffset * 130));
         this.heterodyneOsc.frequency.setTargetAtTime(whistleFreq, now, 0.05);
-        const whistleGain = Math.sin((absOffset / 14) * Math.PI) * 0.08 * staticBase;
+        const whistleGain = Math.sin((absOffset / 14) * Math.PI) * 0.08 * this.settings.staticVolume;
         this.heterodyneGain.gain.setTargetAtTime(whistleGain, now, 0.05);
       } else {
         this.heterodyneGain.gain.setTargetAtTime(0, now, 0.05);
@@ -425,6 +479,12 @@ export class AMAudioEngine {
   public destroy() {
     this.audioElement.pause();
     this.audioElement.src = '';
+    try {
+      if (this.whiteNoiseNode) this.whiteNoiseNode.stop();
+      if (this.crackleNoiseNode) this.crackleNoiseNode.stop();
+    } catch {
+      // Ignored
+    }
     if (this.audioCtx) {
       this.audioCtx.close().catch(() => {});
     }
