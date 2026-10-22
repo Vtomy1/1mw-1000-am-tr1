@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Station } from '../types/radio';
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Radio, Square } from 'lucide-react';
 
 interface AnalogDialProps {
   frequency: number;
@@ -9,6 +9,9 @@ interface AnalogDialProps {
   isPowerOn: boolean;
   onSeek: (direction: 'up' | 'down') => void;
   raster: number;
+  isScanning?: boolean;
+  onToggleScan?: () => void;
+  scanCountdown?: number;
 }
 
 export const AnalogDial: React.FC<AnalogDialProps> = ({
@@ -18,6 +21,9 @@ export const AnalogDial: React.FC<AnalogDialProps> = ({
   isPowerOn,
   onSeek,
   raster,
+  isScanning = false,
+  onToggleScan,
+  scanCountdown = 3.0,
 }) => {
   const dialRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -221,16 +227,50 @@ export const AnalogDial: React.FC<AnalogDialProps> = ({
           </button>
         </div>
 
-        {/* Center Hint */}
-        <div className="hidden sm:flex items-center gap-2 text-xs text-stone-500">
-          <span>Drag dial or use</span>
-          <kbd className="px-1.5 py-0.5 text-[10px] font-mono-numbers bg-stone-800 rounded border border-stone-700 text-stone-300">
-            ←
-          </kbd>
-          <kbd className="px-1.5 py-0.5 text-[10px] font-mono-numbers bg-stone-800 rounded border border-stone-700 text-stone-300">
-            →
-          </kbd>
-          <span>keys</span>
+        {/* Center: Auto-Scan & Keyboard Hint */}
+        <div className="flex items-center gap-3">
+          {onToggleScan && (
+            <button
+              onClick={onToggleScan}
+              disabled={!isPowerOn}
+              className={`relative overflow-hidden flex items-center gap-2 px-3.5 py-1.5 text-xs font-mono-numbers rounded-lg border transition-all ${
+                isScanning
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-400 shadow-md shadow-amber-500/20 font-bold'
+                  : 'bg-stone-900 text-stone-300 border-stone-800 hover:text-amber-400 hover:border-amber-500/50'
+              } disabled:opacity-40 disabled:cursor-not-allowed`}
+              title="Auto-scan strong AM stations (3s pause per station)"
+            >
+              {/* Animated progress underline when scanning */}
+              {isScanning && (
+                <div
+                  className="absolute bottom-0 left-0 h-0.5 bg-amber-400 transition-all duration-100 ease-linear"
+                  style={{ width: `${Math.max(0, Math.min(100, ((3.0 - scanCountdown) / 3.0) * 100))}%` }}
+                />
+              )}
+
+              {isScanning ? (
+                <>
+                  <Square className="w-3 h-3 fill-amber-400 text-amber-400 animate-pulse" />
+                  <span>Stop Scan ({scanCountdown.toFixed(1)}s)</span>
+                </>
+              ) : (
+                <>
+                  <Radio className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Auto-Scan</span>
+                </>
+              )}
+            </button>
+          )}
+
+          <div className="hidden lg:flex items-center gap-1.5 text-xs text-stone-500">
+            <span>Dial</span>
+            <kbd className="px-1.5 py-0.5 text-[10px] font-mono-numbers bg-stone-800 rounded border border-stone-700 text-stone-300">
+              ←
+            </kbd>
+            <kbd className="px-1.5 py-0.5 text-[10px] font-mono-numbers bg-stone-800 rounded border border-stone-700 text-stone-300">
+              →
+            </kbd>
+          </div>
         </div>
 
         {/* Right Step Buttons: Coarse & Fine Up */}

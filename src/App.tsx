@@ -69,6 +69,22 @@ export default function App() {
   const [userLocation, setUserLocation] = useState<{ city: string; region: string; country: string } | null>(null);
   const [isLocating, setIsLocating] = useState<boolean>(false);
 
+  // Auto-scan high-signal stations state
+  const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [scanCountdown, setScanCountdown] = useState<number>(3.0);
+  const isAutoScanningRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    isAutoScanningRef.current = isScanning;
+  }, [isScanning]);
+
+  // Turn off scanning if receiver is placed in standby
+  useEffect(() => {
+    if (!isPowerOn && isScanning) {
+      setIsScanning(false);
+    }
+  }, [isPowerOn, isScanning]);
+
   // Audio Engine singleton ref
   const engineRef = useRef<AMAudioEngine | null>(null);
 
@@ -99,6 +115,10 @@ export default function App() {
 
   // Handle frequency change
   const handleFrequencyChange = useCallback((newFreq: number) => {
+    // If user manually tunes dial, stop auto-scan
+    if (isAutoScanningRef.current) {
+      setIsScanning(false);
+    }
     setFrequency(newFreq);
     if (engineRef.current) {
       engineRef.current.initAudioContext();
@@ -107,10 +127,75 @@ export default function App() {
     }
   }, []);
 
+  // Toggle Auto-Scan through high signal stations (pausing 3 seconds on each)
+  const handleToggleScan = () => {
+    if (!isPowerOn) {
+      setIsPowerOn(true);
+      if (engineRef.current) {
+        engineRef.current.initAudioContext();
+        engineRef.current.setPower(true);
+      }
+    }
+    setIsScanning((prev) => !prev);
+  };
+
+  // Auto-scan cycle implementation:
+  // When active, finds stations with high signal strength (>= 25kW clear channels or verified broadcasters)
+  // Pauses on each station for 3.0 seconds, then advances to the next
+  useEffect(() => {
+    if (!isScanning || !isPowerOn) {
+      setScanCountdown(3.0);
+      return;
+    }
+
+    // High signal strength candidate stations:
+    // Filter clear-channel powerhouses (>= 25 kW) or verified stations
+    const eligibleStations = stations
+      .filter((s) => (s.powerKw ? s.powerKw >= 25 : false) || s.isVerified)
+      .sort((a, b) => a.frequency - b.frequency);
+
+    const candidates = eligibleStations.length >= 2 ? eligibleStations : stations;
+    if (candidates.length === 0) {
+      setIsScanning(false);
+      return;
+    }
+
+    let remaining = 3.0;
+    setScanCountdown(3.0);
+
+    const interval = setInterval(() => {
+      remaining -= 0.1;
+      if (remaining <= 0.05) {
+        remaining = 3.0;
+        setScanCountdown(3.0);
+
+        // Find next high-signal candidate with frequency > current frequency
+        setFrequency((currFreq) => {
+          const next = candidates.find((s) => s.frequency > currFreq + 2) || candidates[0];
+          if (engineRef.current) {
+            engineRef.current.initAudioContext();
+            engineRef.current.playClickSound();
+            engineRef.current.setFrequency(next.frequency);
+          }
+          return next.frequency;
+        });
+      } else {
+        setScanCountdown(Math.max(0, remaining));
+      }
+    }, 100);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [isScanning, isPowerOn, stations]);
+
   // Handle power toggle
   const handleTogglePower = () => {
     const nextPower = !isPowerOn;
     setIsPowerOn(nextPower);
+    if (!nextPower) {
+      setIsScanning(false);
+    }
     if (engineRef.current) {
       engineRef.current.initAudioContext();
       engineRef.current.setPower(nextPower);
@@ -326,6 +411,9 @@ export default function App() {
             analyser={engineRef.current?.getAnalyser() || null}
             onOpenSettings={() => setIsSettingsModalOpen(true)}
             onSeek={handleSeek}
+            isScanning={isScanning}
+            onToggleScan={handleToggleScan}
+            scanCountdown={scanCountdown}
           />
         )}
 

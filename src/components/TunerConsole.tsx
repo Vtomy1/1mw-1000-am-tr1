@@ -36,6 +36,9 @@ interface TunerConsoleProps {
   analyser: AnalyserNode | null;
   onOpenSettings: () => void;
   onSeek: (direction: 'up' | 'down') => void;
+  isScanning?: boolean;
+  onToggleScan?: () => void;
+  scanCountdown?: number;
 }
 
 export const TunerConsole: React.FC<TunerConsoleProps> = ({
@@ -57,6 +60,9 @@ export const TunerConsole: React.FC<TunerConsoleProps> = ({
   analyser,
   onOpenSettings,
   onSeek,
+  isScanning = false,
+  onToggleScan,
+  scanCountdown = 3.0,
 }) => {
   const [knobRotation, setKnobRotation] = useState(0);
   const knobRef = useRef<HTMLDivElement>(null);
@@ -133,6 +139,14 @@ export const TunerConsole: React.FC<TunerConsoleProps> = ({
 
           {/* Current Station Metadata / Status */}
           <div className="flex-1 max-w-lg lg:text-right flex flex-col lg:items-end justify-center">
+            {isScanning && (
+              <div className="flex items-center gap-1.5 mb-1.5 text-xs font-mono-numbers text-amber-400 lg:justify-end">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                <span className="font-semibold uppercase tracking-wider">
+                  Auto-Scanning S9+ Carriers · Next in {scanCountdown.toFixed(1)}s
+                </span>
+              </div>
+            )}
             {currentStation && signal.isLocked ? (
               <>
                 <div className="text-lg font-bold text-stone-100 flex items-center gap-2 lg:justify-end">
@@ -192,6 +206,9 @@ export const TunerConsole: React.FC<TunerConsoleProps> = ({
           isPowerOn={isPowerOn}
           onSeek={onSeek}
           raster={settings.raster}
+          isScanning={isScanning}
+          onToggleScan={onToggleScan}
+          scanCountdown={scanCountdown}
         />
 
         {/* Lower Console: Physical Rotary Tuning Knob & Volume/Noise Strips */}
