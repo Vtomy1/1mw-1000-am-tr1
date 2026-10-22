@@ -1,0 +1,7 @@
+{
+  "name": "MW-1000 AM Tuner",
+  "description": "A minimalist analog AM radio tuner to stream local and regional stations with authentic medium-wave dial tuning, S-meter, and audio filter controls.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
